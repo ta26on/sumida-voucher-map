@@ -6,6 +6,12 @@ for(const id of filterIds) if(params.has(id)) $(id).value=params.get(id);
 const categoryOptions=$('categoryOptions');
 const checkedCategories=()=>categoryOptions.querySelectorAll('input:checked');
 let debounce;
+let storeLocations={};
+let origin=null;
+let locationRequest=0;
+const distances=new Map();
+const nearbyButton=$('nearby');
+const locationStatus=$('locationStatus');
 const norm=s=>(s||'').normalize('NFKC').toLocaleLowerCase('ja').replace(/[\s　]/g,'');
 const text=(tag,value)=>{const e=document.createElement(tag);e.textContent=value??'';return e};
 const ticketLabel=r=>r.ticket_type==='both'?'A券・B券':r.ticket_type==='b_only'?'B券のみ':'券種未確認';
@@ -25,11 +31,139 @@ function syncUrl(categories){
   history.replaceState(null,'',location.pathname+(p.toString()?'?'+p:'')+location.hash);
 }
 function badge(label,muted=false){const e=text('span',label);e.className='tag'+(muted?' muted':'');return e;}
-function openDetail(r){$('dname').textContent=r.name;const body=$('dbody');body.replaceChildren();const badges=document.createElement('div');badges.className='badges';badges.append(badge(ticketLabel(r)),badge(kindLabel(r),true));body.append(badges);
-for(const [label,value] of [['住所',r.address||'住所未登録'],['地域',r.area||'未分類'],['カテゴリ',r.category||'未分類'],['掲載元',r.source||'不明']]){const p=document.createElement('p');const strong=text('strong',label+'：');p.append(strong,text('span',value));body.append(p)}
-if(r.address){const link=document.createElement('a');link.href='https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(r.address);link.target='_blank';link.rel='noopener noreferrer';link.textContent='Google マップで場所を確認 ↗';body.append(link)}
-body.append(text('p','※公式掲載情報であり、現在の利用可否を保証するものではありません。'));$('detail').showModal();}
-function addPage(){const container=$('results');for(const r of filtered.slice(shown,shown+30)){const card=document.createElement('button');card.type='button';card.className='store';const badges=document.createElement('div');badges.className='badges';badges.append(badge(ticketLabel(r)),badge(kindLabel(r),true));card.append(badges,text('h3',r.name),text('p',r.address||'住所未登録'),text('p',r.category||'カテゴリ未登録'));card.addEventListener('click',()=>openDetail(r));container.append(card)}shown=Math.min(shown+30,filtered.length);$('more').hidden=shown>=filtered.length;}
+function validCoordinates(point){
+  return Number.isFinite(point?.latitude)&&Math.abs(point.latitude)<=90
+    &&Number.isFinite(point?.longitude)&&Math.abs(point.longitude)<=180;
+}
+function distanceInMeters(from,to){
+  const radians=degrees=>degrees*Math.PI/180;
+  const latDelta=radians(to.latitude-from.latitude);
+  const lngDelta=radians(to.longitude-from.longitude);
+  const a=Math.sin(latDelta/2)**2
+    +Math.cos(radians(from.latitude))*Math.cos(radians(to.latitude))*Math.sin(lngDelta/2)**2;
+  return 2*6371008.8*Math.asin(Math.sqrt(Math.min(a,1)));
+}
+function updateDistances(){
+  distances.clear();
+  if(!origin)return;
+  for(const store of stores){
+    const point=storeLocations[store.record_id];
+    if(validCoordinates(point)) distances.set(store.record_id,distanceInMeters(origin,point));
+  }
+}
+function distanceLabel(distance){
+  return distance<1000
+    ? Math.round(distance).toLocaleString('ja-JP')+' m'
+    : (distance/1000).toLocaleString('ja-JP',{maximumFractionDigits:1})+' km';
+}
+function mapLink(store){
+  const point=storeLocations[store.record_id];
+  const link=document.createElement('a');
+  if(typeof point?.googleMapsCid==='string'&&/^\d+$/.test(point.googleMapsCid)){
+    link.href='https://www.google.com/maps?cid='+point.googleMapsCid;
+    link.textContent='Google マップで店舗を開く ↗';
+  }else if(validCoordinates(point)){
+    const query=encodeURIComponent(point.latitude+','+point.longitude);
+    link.href='https://www.google.com/maps/search/?api=1&query='+query;
+    link.textContent='Google マップで店舗の位置を開く ↗';
+  }else if(store.address){
+    link.href='https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(store.address);
+    link.textContent='Google マップで住所を検索 ↗';
+  }else return null;
+  link.target='_blank';
+  link.rel='noopener noreferrer';
+  return link;
+}
+function openDetail(r){
+  $('dname').textContent=r.name;
+  const body=$('dbody');
+  body.replaceChildren();
+  const badges=document.createElement('div');
+  badges.className='badges';
+  badges.append(badge(ticketLabel(r)),badge(kindLabel(r),true));
+  body.append(badges);
+  const fields=[
+    ['住所',r.address||'住所未登録'],
+    ['地域',r.area||'未分類'],
+    ['カテゴリ',r.category||'未分類'],
+    ['掲載元',r.source||'不明']
+  ];
+  if(distances.has(r.record_id)) fields.push(['現在地からの直線距離',distanceLabel(distances.get(r.record_id))]);
+  for(const [label,value] of fields){
+    const p=document.createElement('p');
+    p.append(text('strong',label+'：'),text('span',value));
+    body.append(p);
+  }
+  const link=mapLink(r);
+  if(link) body.append(link);
+  body.append(text('p','※公式掲載情報であり、現在の利用可否を保証するものではありません。'));
+  $('detail').showModal();
+}
+function addPage(){
+  const container=$('results');
+  for(const r of filtered.slice(shown,shown+30)){
+    const card=document.createElement('button');
+    card.type='button';
+    card.className='store';
+    const badges=document.createElement('div');
+    badges.className='badges';
+    badges.append(badge(ticketLabel(r)),badge(kindLabel(r),true));
+    card.append(badges,text('h3',r.name),text('p',r.address||'住所未登録'),text('p',r.category||'カテゴリ未登録'));
+    if(origin){
+      const label=distances.has(r.record_id)
+        ? '直線距離 約 '+distanceLabel(distances.get(r.record_id))
+        : '距離未表示（店舗の座標未登録）';
+      card.append(text('p',label));
+    }
+    card.addEventListener('click',()=>openDetail(r));
+    container.append(card);
+  }
+  shown=Math.min(shown+30,filtered.length);
+  $('more').hidden=shown>=filtered.length;
+}
+function resetLocation(){
+  origin=null;
+  locationRequest++;
+  updateDistances();
+  nearbyButton.removeAttribute('aria-busy');
+  nearbyButton.textContent='現在地から近い順';
+  nearbyButton.setAttribute('aria-pressed','false');
+  if(!nearbyButton.disabled) locationStatus.textContent='';
+}
+nearbyButton.addEventListener('click',()=>{
+  if(origin||nearbyButton.getAttribute('aria-busy')==='true'){
+    resetLocation();
+    render();
+    return;
+  }
+  const request=++locationRequest;
+  const finish=()=>{
+    if(request!==locationRequest)return false;
+    nearbyButton.removeAttribute('aria-busy');
+    nearbyButton.textContent='現在地から近い順';
+    return true;
+  };
+  nearbyButton.textContent='現在地の取得をキャンセル';
+  nearbyButton.setAttribute('aria-busy','true');
+  locationStatus.textContent='現在地を取得中…';
+  navigator.geolocation.getCurrentPosition(({coords})=>{
+    if(!finish())return;
+    if(!validCoordinates(coords)){
+      locationStatus.textContent='現在地を取得できませんでした。もう一度お試しください。';
+      return;
+    }
+    origin=coords;
+    updateDistances();
+    nearbyButton.textContent='近い順を解除';
+    nearbyButton.setAttribute('aria-pressed','true');
+    render();
+  },error=>{
+    if(!finish())return;
+    locationStatus.textContent=error.code===1
+      ? '位置情報が許可されていません。ブラウザの設定をご確認ください。'
+      : '現在地を取得できませんでした。もう一度お試しください。';
+  },{timeout:10000,maximumAge:0});
+});
 function render(){
   clearTimeout(debounce);
   debounce=undefined;
@@ -38,6 +172,14 @@ function render(){
   $('clearCategories').disabled=categories.size===0;
   syncUrl(categories);
   filtered=stores.filter(r=>matches(r,categories));
+  if(origin){
+    const sortDistance=store=>distances.get(store.record_id)??Number.MAX_VALUE;
+    filtered.sort((a,b)=>sortDistance(a)-sortDistance(b));
+    const located=filtered.filter(store=>distances.has(store.record_id)).length;
+    locationStatus.textContent=located
+      ? '座標登録済みの '+located+' 件を直線距離順に表示します。'
+      : '検索結果に座標登録済みの店舗がありません。';
+  }
   shown=0;
   $('resultCount').textContent=filtered.length.toLocaleString('ja-JP');
   $('results').replaceChildren();
@@ -86,6 +228,7 @@ $('clear').addEventListener('click',()=>{
     params.delete(id);
   }
   resetCategories();
+  resetLocation();
   render();
   $('q').focus();
 });
@@ -96,4 +239,31 @@ $('q').addEventListener('input',()=>{
   clearTimeout(debounce);
   debounce=setTimeout(render,200);
 });
-fetch('stores.json').then(r=>{if(!r.ok)throw Error(r.status);return r.json()}).then(data=>{stores=data;$('total').textContent=stores.length+' 件掲載';options('area',stores.map(r=>r.area));addCategoryOptions();render()}).catch(e=>{$('total').textContent='読み込み失敗';$('results').textContent='データを読み込めません。ローカルサーバーから開いてください。 '+e.message});
+async function fetchJson(url){
+  const response=await fetch(url);
+  if(!response.ok)throw Error(response.status);
+  return response.json();
+}
+const storesReady=fetchJson('stores.json').then(data=>{
+  stores=data;
+  $('total').textContent=stores.length+' 件掲載';
+  options('area',stores.map(r=>r.area));
+  addCategoryOptions();
+  render();
+});
+storesReady.catch(error=>{
+  $('total').textContent='読み込み失敗';
+  $('results').textContent='データを読み込めません。ローカルサーバーから開いてください。 '+error.message;
+});
+Promise.all([storesReady,fetchJson('store-locations.json')]).then(([,locations])=>{
+  storeLocations=locations;
+  if(!window.isSecureContext||!navigator.geolocation){
+    locationStatus.textContent='この環境では現在地を取得できません。';
+  }else if(stores.some(store=>validCoordinates(storeLocations[store.record_id]))){
+    nearbyButton.disabled=false;
+  }else{
+    locationStatus.textContent='座標登録済みの店舗はありません。';
+  }
+}).catch(()=>{
+  locationStatus.textContent='現在地からの検索に必要なデータを読み込めませんでした。';
+});
