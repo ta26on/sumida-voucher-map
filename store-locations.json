@@ -1,0 +1,45 @@
+{
+  "ab-0096": {
+    "latitude": 35.696865,
+    "longitude": 139.7984625,
+    "source": "https://www.edoyu.com/ryougoku/access/",
+    "googleMapsCid": "13532544118803457656"
+  },
+  "ab-0283": {
+    "latitude": 35.6959726,
+    "longitude": 139.8124506,
+    "source": "https://www.famy-inn.com/access/",
+    "googleMapsCid": "15169102982867289153"
+  },
+  "ab-0428": {
+    "latitude": 35.7086869,
+    "longitude": 139.809384,
+    "source": "https://www.mirindou.com/access.html",
+    "googleMapsCid": "9356230072965085358"
+  },
+  "b-012": {
+    "latitude": 35.700331,
+    "longitude": 139.809902,
+    "source": "https://www.maruetsu.co.jp/store/9149/"
+  },
+  "b-013": {
+    "latitude": 35.696181,
+    "longitude": 139.804566,
+    "source": "https://www.maruetsu.co.jp/store/9338/"
+  },
+  "b-014": {
+    "latitude": 35.687227,
+    "longitude": 139.80591,
+    "source": "https://www.maruetsu.co.jp/store/9479/"
+  },
+  "b-015": {
+    "latitude": 35.705053,
+    "longitude": 139.804908,
+    "source": "https://www.maruetsu.co.jp/store/9407/"
+  },
+  "b-016": {
+    "latitude": 35.694481,
+    "longitude": 139.798609,
+    "source": "https://www.maruetsu.co.jp/store/9388/"
+  }
+}
